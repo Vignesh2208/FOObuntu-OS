@@ -1,0 +1,27 @@
+Things to do
+
+1. Uncomment systemcalls.c: ~280
+clear_screen(curr_pcb->curr_terminal);
+comment print shell number
+
+2. Comment every file
+3. make #define constants for magic numbers
+
+4. in isr.S: ~214 	popl %eax why is it dones?
+
+5. irq.c: 264 - commented
+		// if(r->ss != USER_DS)
+		// curr_tss->ss = KERNEL_DS; //WHY??????
+		// else
+		// curr_tss->ss = USER_DS;
+
+and added, 
+	curr_tss->ss = r->ss;
+
+6. Disable (disable_irq()) interrupt below the priority level while handling interrupt. Warning: Unexpected result may be experienced
+
+7. ^ is not sti() and cli(). Use sti() and cli() with caution and care.
+
+8. Check if syserr command works before committing the final version
+
+9. Try to get the ahlf credits for the lost points

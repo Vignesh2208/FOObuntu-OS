@@ -1,0 +1,35 @@
+K 25
+svn:wc:ra_dav:version-url
+V 64
+/svn/fa15-ece391/!svn/ver/19434/FOObuntu/student-distrib/drivers
+END
+rtc.h
+K 25
+svn:wc:ra_dav:version-url
+V 70
+/svn/fa15-ece391/!svn/ver/16744/FOObuntu/student-distrib/drivers/rtc.h
+END
+keyboard.c
+K 25
+svn:wc:ra_dav:version-url
+V 75
+/svn/fa15-ece391/!svn/ver/19434/FOObuntu/student-distrib/drivers/keyboard.c
+END
+drivers.h
+K 25
+svn:wc:ra_dav:version-url
+V 74
+/svn/fa15-ece391/!svn/ver/14947/FOObuntu/student-distrib/drivers/drivers.h
+END
+keyboard.h
+K 25
+svn:wc:ra_dav:version-url
+V 75
+/svn/fa15-ece391/!svn/ver/19009/FOObuntu/student-distrib/drivers/keyboard.h
+END
+rtc.c
+K 25
+svn:wc:ra_dav:version-url
+V 70
+/svn/fa15-ece391/!svn/ver/19175/FOObuntu/student-distrib/drivers/rtc.c
+END

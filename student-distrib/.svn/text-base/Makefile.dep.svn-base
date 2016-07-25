@@ -1,0 +1,30 @@
+boot.o: boot.S multiboot.h x86_desc.h types.h
+isr.o: isr.S
+paging_asm.o: paging_asm.S
+x86_desc.o: x86_desc.S x86_desc.h types.h
+filesys.o: filesys.c filesys.h types.h lib.h pcb.h x86_desc.h \
+  drivers/drivers.h drivers/rtc.h drivers/../lib.h drivers/keyboard.h \
+  drivers/../pcb.h
+i8259.o: i8259.c i8259.h types.h lib.h
+irq.o: irq.c isr.h x86_desc.h types.h i8259.h lib.h systemcalls.h \
+  drivers/drivers.h drivers/rtc.h drivers/../lib.h drivers/keyboard.h \
+  drivers/../pcb.h drivers/../x86_desc.h pcb.h pit.h paging.h
+kernel.o: kernel.c multiboot.h types.h x86_desc.h lib.h i8259.h debug.h \
+  drivers/drivers.h drivers/rtc.h drivers/../lib.h drivers/keyboard.h \
+  drivers/../pcb.h drivers/../x86_desc.h isr.h paging.h filesys.h pcb.h \
+  systemcalls.h pit.h
+lib.o: lib.c lib.h types.h
+paging.o: paging.c paging.h lib.h types.h x86_desc.h systemcalls.h \
+  drivers/drivers.h drivers/rtc.h drivers/../lib.h drivers/keyboard.h \
+  drivers/../pcb.h drivers/../x86_desc.h pcb.h
+pit.o: pit.c pit.h lib.h types.h drivers/drivers.h drivers/rtc.h \
+  drivers/../lib.h drivers/keyboard.h drivers/../pcb.h \
+  drivers/../x86_desc.h drivers/../types.h x86_desc.h pcb.h systemcalls.h \
+  paging.h isr.h i8259.h
+systemcalls.o: systemcalls.c paging.h lib.h types.h x86_desc.h filesys.h \
+  pcb.h systemcalls.h drivers/drivers.h drivers/rtc.h drivers/../lib.h \
+  drivers/keyboard.h drivers/../pcb.h
+keyboard.o: drivers/keyboard.c drivers/keyboard.h drivers/../lib.h \
+  drivers/../types.h drivers/../pcb.h drivers/../x86_desc.h
+rtc.o: drivers/rtc.c drivers/rtc.h drivers/../lib.h drivers/../types.h \
+  drivers/../pcb.h drivers/../x86_desc.h

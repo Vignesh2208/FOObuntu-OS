@@ -1,0 +1,27 @@
+BUGXX
+
+Checkpoint 1: inlcuding C style header files with structures inside assembly
+
+Checkpoint 2: 
+
+Checkpoint 3: Halt resulted in pagefault. It was because we didn't restore the paging
+Design didn't reach expectation of TA. When shell was exited we just exited like nice boy. But apparently the she had to have been a rowdy and not exit.
+
+Checkpoint 4: Getargs could not handle buffer overflow
+			in execute and getargs (systemcalls.c) added a check where if the input is larger than MAX_ARG_SIZE then fill the array with the available input
+			until the second to last character and replace the last entry of the array (which will get passed onto the pcb) with a null character
+
+Checkpoint 5:
+When switching terminal when running an additional shell on the first terminal, then switching back gets a page fault 
+solution: moving the parent child relation into the else statement in execute where it checks if the current execute is for one of the initial shell.
+
+OS crashed when trying to implement scheduler (PIT)
+	Fixed by adding the isr_pit which is the assembly linkage to the IDT table in kernel.c
+
+While running pingpong in one shell and switch to another terminal then switch back, there is a null pointer exception
+	fixed by assigning the DS register in isr.S in the correct place(after other registers are restored)
+
+When a base shell is exited while other programs are running the other program does not run and is unable to get keyboard interrupt
+	fixed by correctly assigning the runqueue values in the halt, when a base shell is exited. (Would look a lot like the execute runqueue assignment)
+
+

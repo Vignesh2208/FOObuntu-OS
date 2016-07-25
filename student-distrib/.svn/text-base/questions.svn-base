@@ -1,0 +1,5 @@
+Questions:
+1. Far Call?
+2. Does INT 0x80 change from user stack to kernel stack? Yes.
+3. What happens when we command is entered? Look at the shell user program/
+4. Why is PIT used?

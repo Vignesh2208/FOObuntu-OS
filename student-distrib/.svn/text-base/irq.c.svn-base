@@ -1,0 +1,476 @@
+#include "isr.h"
+#include "x86_desc.h"
+#include "i8259.h"
+#include "lib.h"
+#include "systemcalls.h"
+#include "pit.h"
+#include "paging.h"
+
+
+#define BITMASK_HALT_8 0xff
+#define BITMASK_HALT_16 0xffff
+extern int read_cr2();
+
+/* This defines what the stack looks like after an ISR was running */
+struct regs
+{
+    unsigned int gs, fs, es, ds;      /* pushed the segs last */
+    unsigned int edi, esi, ebp, esp, ebx, edx, ecx, eax;  /* pushed by 'pusha' */
+    unsigned int int_no, err_code;    /* our 'push byte #' and ecodes do this */
+    unsigned int eip, cs, eflags, user_esp, ss;   /* pushed by the processor automatically */ 
+};
+/*
+ * handle_div_exception
+ *   DESCRIPTION: Jump table entry from exception_handler and prints division by 0 exception
+ *   INPUTS: none
+ *   OUTPUTS: Prints Div by zero onto screen
+ *   RETURN VALUE: none
+ *   SIDE EFFECTS: clears screen  
+ */  
+void handle_div_exception(){
+
+	clear();
+	printf("Div by zero - Are you nuts!\n");
+}
+
+/*
+ * handle_page_fault_exception
+ *   DESCRIPTION: Jump table entry from exception_handler and prints page fault exception
+ *   INPUTS: none
+ *   OUTPUTS: Prints page fault error depending on the value of the value in CR2
+ * 				if NULL then prints NUll pointer exception and for other addresses then page fault exception
+ *   RETURN VALUE: none
+ *   SIDE EFFECTS: clears screen  
+ */ 
+void handle_page_fault_exception(){
+	//clear();
+
+	int address = read_cr2();
+	if(address == NULL)
+		printf("Null pointer exception!\n");
+	else
+		printf("Page Fault Exception : %x\n",address);
+}
+
+
+void handle_invalid_tss(){
+	clear();
+
+	printf("Invalid TSS\n");
+}
+
+void handle_invalid_opcode(){
+	clear();
+
+	printf("Invalid Opcode\n");
+}
+
+void handle_invalid_ss(){
+	clear();
+
+	printf("Invalid SS\n");
+}
+
+void handle_invalid_segment(){
+	clear();
+
+	printf("Invalid SEGMENT\n");
+}
+
+
+/*
+ * exception_handler
+ *   DESCRIPTION: Jump table for handling exceptions
+ *   INPUTS: exception number based on PIC
+ *   OUTPUTS: none
+ *   RETURN VALUE: none
+ *   SIDE EFFECTS: none 
+ */ 
+void exception_handler(int exception_number){
+
+	switch(exception_number){
+
+		case DIV_ERROR_EXCEPTION : 		handle_div_exception();
+										break;
+		case PAGE_FAULT_EXCEPTION :		handle_page_fault_exception();
+										break;
+		case INVALID_TSS:				handle_invalid_tss();
+										break;
+		case INVALID_SS:				handle_invalid_ss();
+										break;				
+		case INVALID_OPCODE:			handle_invalid_opcode();
+										break;										
+		case SEG_ABSENT:				handle_invalid_segment();
+										break;										
+		
+		default :
+					break;
+
+
+	}
+
+
+
+}
+/* helper function that disables the irq and the eoi at the specified irq number*/
+void mask_and_ack(int irq_num){
+
+	disable_irq(irq_num);
+	send_eoi(irq_num);
+	
+}
+
+
+/*
+ * exception_handler
+ *   DESCRIPTION: Jump table for handling exceptions
+ *   INPUTS: register values specified in the regs at the top of irq.c
+ *   OUTPUTS: none
+ *   RETURN VALUE: 0 on success -1 on failure
+ *   SIDE EFFECTS: none 
+ */ 
+int sys_call_dispatcher(struct regs * r){
+	
+	int syscall_number = r->eax;
+	int ret;
+	uint8_t status;
+	char* filename;
+	switch(syscall_number){
+		
+		case EXECUTE :		filename = (char *)r->ebx;
+							ret = execute((uint8_t *)filename);
+							break;
+		case OPEN	 :		filename = (char *)r->ebx;
+							ret = open((uint8_t *)filename);
+							break;
+		case CLOSE	 :		ret = close((uint32_t)r->ebx);
+							break;
+							
+		case READ	 :		sti();
+							ret = read(r->ebx, (uint8_t *)r->ecx, (int)r->edx);
+							break;
+							
+							
+		case WRITE 	  :		ret = write(r->ebx, (uint8_t *)r->ecx, (int)r->edx);
+							break;
+		case HALT 	  : 	status=r->ebx&BITMASK_HALT_8;
+							ret=halt(status)&BITMASK_HALT_16;
+							break;
+		case GETARGS  :		ret=getargs((uint8_t *)r->ebx,(int32_t)r->ecx);
+							break;
+
+		case VIDMAP   :		ret = vidmap((uint8_t **)r->ebx);
+							break;
+		default		  :		ret = -1;
+							break;
+		
+	}
+	
+	
+	return ret;
+	
+}
+
+/*
+ * handler
+ *   DESCRIPTION: When exception or interrupt occurs this function handles it
+ *   INPUTS: regs struct which is what the stack will look when this is called
+ *   OUTPUTS: Prints exception at pid that occurred
+ *   RETURN VALUE: none
+ *   SIDE EFFECTS: none  
+ */ 
+int handler(struct regs *r)
+{
+    /* Is this a fault whose number is from 0 to 31? */
+    int i = 0;
+    for(i = 0; i < MAX_N_PROCESSES; i++){
+    	if(used_pids[i] != UNUSED_PID)
+    		break;
+    }
+
+    
+    if(i < MAX_N_PROCESSES && r->int_no == 0x80 ){
+		cli();
+		//printf("Current sys : %d\n",current->pid);
+    	// update current tss
+    	pcb * current_task = current;
+    	//printf("current = %x\n",current);
+    	//printf("current EFLAGS = %x\n",r->eflags);
+    	//if(next_task == current){
+
+    	//printf("Current sys esp : %x, curr uesp = %x curr ss = %x\n",r->esp,r->user_esp,r->ss);
+		tss_t * curr_tss = &current_task->hardware_context;
+		curr_tss->ds = r->ds;
+		curr_tss->cs = r->cs;
+		curr_tss->es = r->es;
+		curr_tss->fs = r->fs;
+		curr_tss->gs = r->gs;
+		curr_tss->edi = r->edi;
+		curr_tss->esi = r->esi;
+		curr_tss->ebp = r->ebp;
+		curr_tss->esp = r->user_esp;
+		curr_tss->ebx = r->ebx;
+		curr_tss->edx = r->edx;
+		curr_tss->ecx = r->ecx;
+		curr_tss->eax = r->eax;
+		curr_tss->eip = r->eip;
+		curr_tss->eflags = r->eflags;
+		if(r->ss != USER_DS)
+		curr_tss->ss = KERNEL_DS;
+		else
+		curr_tss->ss = USER_DS;
+
+		next_task = current_task;
+
+  		
+
+    	//printf("current = %x\n",current);
+    	//printf("current EFLAGS = %x\n",r->eflags);
+    	//if(next_task == current){
+    	
+    	/*curr_tss = &current_task->secondary_hardware_context;
+		
+		curr_tss->ds = r->ds;
+		curr_tss->cs = r->cs;
+		curr_tss->es = r->es;
+		curr_tss->fs = r->fs;
+		curr_tss->gs = r->gs;
+		curr_tss->edi = r->edi;
+		curr_tss->esi = r->esi;
+		curr_tss->ebp = r->ebp;
+		curr_tss->esp = r->user_esp;
+		curr_tss->ebx = r->ebx;
+		curr_tss->edx = r->edx;
+		curr_tss->ecx = r->ecx;
+		curr_tss->eax = r->eax;
+		curr_tss->eip = r->eip;
+		curr_tss->eflags = r->eflags;
+		curr_tss->esp0 = r->esp;
+		if(r->ss != USER_DS)
+		curr_tss->ss = KERNEL_DS;
+		else
+		curr_tss->ss = USER_DS;*/
+
+
+		//current_task->hardware_context.esp0 = r->esp;
+
+		//}
+		/*
+		curr_tss = &current_task->secondary_hardware_context;
+		curr_tss->ds = r->ds;
+		curr_tss->cs = r->cs;
+		curr_tss->es = r->es;
+		curr_tss->fs = r->fs;
+		curr_tss->gs = r->gs;
+		curr_tss->edi = r->edi;
+		curr_tss->esi = r->esi;
+		curr_tss->ebp = r->ebp;
+		curr_tss->esp = r->user_esp;
+		curr_tss->ebx = r->ebx;
+		curr_tss->edx = r->edx;
+		curr_tss->ecx = r->ecx;
+		curr_tss->eax = r->eax;
+		curr_tss->eip = r->eip;
+		curr_tss->eflags = r->eflags;
+		*/
+		//next_task = current_task;
+
+    }
+    else{
+
+    	cli();
+    	//if(next_task != 0){
+
+		//printf("Current : %d\n",current->pid);
+		//printf("Current esp : %x, curr uesp = %x curr ss = %x\n",r->esp,r->user_esp, r->ss);
+		//printf("New interrupt Eip : %x\n",r->eip);
+        //printf("Esp : %x, User esp : %x\n", r->esp,r->user_esp);
+        //printf("cs : %x, ds : %x, es : %x, ss : %x\n", r->cs,r->ds,r->es,r->ss);
+        //printf("Eflags : %x\n",r->eflags);
+        //printf("Registers : edi : %x, esi : %x, ebp : %x\n eax : %x, ebx : %x, edx : %x, ecx : %x\n",r->edi,r->esi,r->ebp, r->eax, r->ebx, r->edx, r->ecx );
+
+		
+    	pcb * current_task = current;
+    	//printf("current = %x\n",current);
+    	//printf("current EFLAGS = %x\n",r->eflags);
+    	//if(next_task == current){
+    	tss_t * curr_tss = &current_task->secondary_hardware_context;
+		
+		curr_tss->ds = r->ds;
+		curr_tss->cs = r->cs;
+		curr_tss->es = r->es;
+		curr_tss->fs = r->fs;
+		curr_tss->gs = r->gs;
+		curr_tss->edi = r->edi;
+		curr_tss->esi = r->esi;
+		curr_tss->ebp = r->ebp;
+		curr_tss->esp = r->user_esp;
+		//curr_tss->esp = current->hardware_context.esp;
+		curr_tss->ebx = r->ebx;
+		curr_tss->edx = r->edx;
+		curr_tss->ecx = r->ecx;
+		curr_tss->eax = r->eax;
+		curr_tss->eip = r->eip;
+		curr_tss->eflags = r->eflags;
+		//curr_tss->esp0 = r->esp + 0x24;
+		if(r->ss != USER_DS){
+			curr_tss->ss = KERNEL_DS;
+			//curr_tss->esp0 = r->user_esp;
+			curr_tss->esp0 = r->esp + 0x14;
+		}
+		else{
+			curr_tss->ss = USER_DS;
+			//curr_tss->esp0 = r->esp + 0x24;
+			curr_tss->esp0 = current->hardware_context.esp0;
+		}
+		//current_task->hardware_context.esp0 = r->esp;
+
+		next_task = current_task;
+		//}
+		//}
+    	//next_task = 0;
+    }
+
+  
+
+    if (r->int_no < 32)
+    {
+        /* Display the description for the Exception that occurred.
+        *  In this tutorial, we will simply halt the system using an
+        *  infinite loop */
+        //clear();
+        printf("Exception. pid : %d\n",current->pid);
+        printf("Eip : %x\n",r->eip);
+        printf("Esp : %x, User esp : %x\n", r->esp,r->user_esp);
+        printf("cs : %x, ds : %x, es : %x, ss : %x\n", r->cs,r->ds,r->es,r->ss);
+        printf("Eflags : %x\n",r->eflags);
+        printf("Registers : edi : %x, esi : %x, ebp : %x\n eax : %x, ebx : %x, edx : %x, ecx : %x\n",r->edi,r->esi,r->ebp, r->eax, r->ebx, r->edx, r->ecx );
+        
+        exception_handler(r->int_no);
+        while(1);
+    }
+	else if(r->int_no >= 32 && r->int_no < 48){
+		 cli();
+		mask_and_ack(r->int_no);
+		(*interrupt_handlers_array[r->int_no - 32])();
+		cli();
+		enable_irq(r->int_no);
+		if(next_task != 0){
+
+			next_task->type_of_return = 1; // return from interrupt
+			
+			if(next_task != current){
+
+				//clear();
+
+				//printf("next_task pid : %d, current pid :  %d\n",next_task->pid,current->pid);
+			 	//printf("next task esp0 : %d\n",next_task->secondary_hardware_context.esp0);
+				//printf("old tss_desc_ptr = %x%x%x\n",tss_desc_ptr.base_31_24,tss_desc_ptr.base_23_16,tss_desc_ptr.base_15_00);
+
+				tss.esp0 = next_task->secondary_hardware_context.esp0;
+				tss.ss0 = next_task->secondary_hardware_context.ss0;
+
+				//if(next_task->secondary_hardware_context.ds == USER_DS)
+				load_paging(next_task->pid);
+				// if(next_task->pid == 1){
+				// 	//while(1);
+				// 	printf("here too\n");quit
+				// }
+
+
+				// printf("new esp0 : %x, old esp0 : %x\n", tss.esp0,current->secondary_hardware_context.esp0);
+				// printf("new eip : %x, old eip : %x\n", next_task->secondary_hardware_context.eip,current->secondary_hardware_context.eip);
+				// printf("primary new eip : %x, old eip : %x\n", next_task->hardware_context.eip,current->hardware_context.eip);
+
+				// printf("new cs : %x\n", next_task->secondary_hardware_context.cs);
+				// printf("new ss : %x\n", next_task->secondary_hardware_context.ss);
+				// printf("new ds : %x\n", next_task->secondary_hardware_context.ds);
+				// printf("new user esp : %x, old user esp : %x\n",next_task->secondary_hardware_context.esp,current->secondary_hardware_context.esp);
+				// printf("Registers : edi : %x, esi : %x, ebp : %x\n eax : %x, ebx : %x, edx : %x, ecx : %x\n",next_task->secondary_hardware_context.edi,next_task->secondary_hardware_context.esi,next_task->secondary_hardware_context.ebp, next_task->secondary_hardware_context.eax, next_task->secondary_hardware_context.ebx, next_task->secondary_hardware_context.edx, next_task->secondary_hardware_context.ecx );
+				// //printf("Registers : edi : %x, esi : %x, ebp : %x\n eax : %x, ebx : %x, edx : %x, ecx : %x\n",next_task->hardware_context.edi,next_task->hardware_context.esi,next_task->hardware_context.ebp, next_task->hardware_context.eax, next_task->hardware_context.ebx, next_task->hardware_context.edx, next_task->hardware_context.ecx );
+				// printf("new eflags : %x\n", next_task->secondary_hardware_context.eflags);
+			}
+			else{
+				//next_task = 0;
+				load_paging(current->pid);
+			}
+			
+		}
+		return 1;
+
+	}
+	else if(r->int_no == 0x80){
+		int ret;
+		// cli();
+		ret = sys_call_dispatcher(r);
+		cli();
+		if(next_task != 0 ){
+
+			
+			if(next_task != current){
+				next_task->type_of_return = 0;
+				tss.esp0 = next_task->hardware_context.esp0;
+				//tss.ss0 = next_task->hardware_context.ss0;
+				load_paging(next_task->pid);
+
+			}
+			else{
+				/*
+				printf("Return from syscall. esp0 reset : %x\n",next_task->hardware_context.esp0);
+				printf("new eip : %x\n", next_task->hardware_context.eip);
+				printf("new cs : %x\n", next_task->hardware_context.cs);
+				printf("new ss : %x\n", next_task->hardware_context.ss);
+				printf("new ds : %x\n", next_task->hardware_context.ds);
+				printf("new esp : %x\n", next_task->hardware_context.esp);
+				*/
+				
+				// if(next_task->pid == 3){
+				// 	printf("here\n");
+				// }
+				current->type_of_return = 0;
+				//printf("finished1\n");
+				
+				next_task->secondary_hardware_context.esp0 = current->hardware_context.esp0;
+				//printf("finished2\n");
+				tss.esp0 = current->hardware_context.esp0;
+				//printf("finished3\n");
+				load_paging(current->pid);
+				//printf("wrong ----------------------------------");
+				//printf("returned\n");
+				// if(next_task->pid == 3){
+				// 	printf("returned\n");
+				// }
+
+			}
+			
+			/*
+			if(next_task != current){
+			{
+          		seg_desc_t the_tss_desc;
+          		the_tss_desc.granularity    = 0;
+          		the_tss_desc.opsize         = 0;
+          		the_tss_desc.reserved       = 0;
+          		the_tss_desc.avail          = 0;
+          		the_tss_desc.seg_lim_19_16  = TSS_SIZE & 0x000F0000;
+          		the_tss_desc.present        = 1;
+          		the_tss_desc.dpl            = 0x0;
+          		the_tss_desc.sys            = 0;
+          		the_tss_desc.type           = 0x9;
+          		the_tss_desc.seg_lim_15_00  = TSS_SIZE & 0x0000FFFF;
+
+          		SET_TSS_PARAMS(the_tss_desc, &next_task->hardware_context, tss_size);
+          		tss_desc_ptr = the_tss_desc;    
+          		ltr(KERNEL_TSS);
+          	}
+
+
+    		}
+    		*/
+
+		}
+		return ret;
+		
+	}
+	//should never end up here
+	return 0;
+}

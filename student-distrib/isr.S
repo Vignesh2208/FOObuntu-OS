@@ -1,0 +1,340 @@
+
+#define DIV_ERROR_EXCEPTION 0x0
+#define PAGE_FAULT_EXCEPTION 0x0E
+#define RTC_INT 0x28
+#define PIT_INT 0x20
+#define KEYBOARD_INT 0x21
+#define SYS_CALL 0x80
+#define INVALID_OPCODE 0x6
+#define INVALID_TSS 0xA
+#define INVALID_SS 0xC
+#define SEG_ABSENT 0xB
+#define TOR_OFFSET 0xD0 
+
+
+
+#define MAX_INT_NUM 16
+#define EIP_OFFSET 0x20
+#define EFLAGS_OFFSET 0x24
+#define ESP_OFFSET 0x38
+#define CS_OFFSET 0x4C
+#define DS_OFFSET 0x54
+#define SS_OFFSET 0x50
+#define EAX_OFFSET 0x28
+#define EBX_OFFSET 0x34
+#define ECX_OFFSET 0x2C
+#define EDX_OFFSET 0x30
+#define EDI_OFFSET 0x44
+#define ESI_OFFSET 0x40
+#define EBP_OFFSET 0x3C
+
+#define SEC_ESP0 (0x20 + 0x68)
+#define SEC_EIP_OFFSET (0x20+0x68)
+#define SEC_EFLAGS_OFFSET (0x24+0x68)
+#define SEC_ESP_OFFSET (0x38+0x68)
+#define SEC_CS_OFFSET (0x4C+0x68)
+#define SEC_DS_OFFSET (0x54+0x68)
+#define SEC_SS_OFFSET (0x50+0x68)
+#define SEC_EAX_OFFSET (0x28+0x68)
+#define SEC_EBX_OFFSET (0x34+0x68)
+#define SEC_ECX_OFFSET (0x2C+0x68)
+#define SEC_EDX_OFFSET (0x30+0x68)
+#define SEC_EDI_OFFSET (0x44+0x68)
+#define SEC_ESI_OFFSET (0x40+0x68)
+#define SEC_EBP_OFFSET (0x3C+0x68)
+
+.globl isr_pit,isr_page_fault, isr_div_error, isr_keyboard, isr_rtc, read_cr2, call_execute, isr_system_call, isr_invalid_SEG_ABSENT, isr_invalid_SS, isr_invalid_TSS, isr_invalid_opcode
+
+#read the cr2
+read_cr2:
+_read_cr2:
+    pushl %ebp
+    movl %esp, %ebp
+    movl %cr2, %eax
+    leave
+    ret
+
+#pushes page fault exception number
+isr_page_fault:
+_isr_page_fault:
+
+	cli
+	pushl $PAGE_FAULT_EXCEPTION
+	jmp common_irq_dispatch
+#pushes diviison by 0 exception number
+isr_div_error:
+_isr_div_error:
+	cli
+	pushl $0x0
+	pushl $DIV_ERROR_EXCEPTION
+	jmp common_irq_dispatch
+
+#pushes keyboard exception number
+isr_keyboard:
+_isr_keyboard:
+	cli
+	pushl $0x0
+	pushl $KEYBOARD_INT
+	jmp common_irq_dispatch
+
+#Pit call interrupt linkage
+isr_pit:
+_isr_pit:
+	cli
+	pushl $0x0
+	pushl $PIT_INT
+	jmp common_irq_dispatch
+
+
+#RTC interrupt linkage
+isr_rtc:
+_isr_rtc:
+	cli
+	pushl $0x0
+	pushl $RTC_INT
+	jmp common_irq_dispatch
+
+#Sys call interrupt linkage
+isr_system_call:
+_isr_system_call:
+	
+	pushl $0x0
+	pushl $SYS_CALL
+	jmp common_irq_dispatch
+	
+isr_invalid_opcode:
+_isr_invalid_opcode:
+	cli
+	pushl $0x0
+	pushl $INVALID_OPCODE
+	jmp common_irq_dispatch
+	
+isr_invalid_SEG_ABSENT:
+_isr_invalid_SEG_ABSENT:
+	cli
+	
+	pushl $SEG_ABSENT
+	jmp common_irq_dispatch
+
+isr_invalid_TSS:
+_isr_invalid_TSS:
+	cli
+	
+	pushl $INVALID_TSS
+	jmp common_irq_dispatch
+	
+isr_invalid_SS:
+_isr_invalid_SS:
+	cli
+	
+	pushl $INVALID_SS
+	jmp common_irq_dispatch
+	
+	
+.extern handler
+.extern next_task
+
+#sets up the stack and calls the handler function in irq
+common_irq_dispatch:
+
+	pusha
+    pushl %ds
+    pushl %es
+    pushl %fs
+    pushl %gs
+    movw $0x18, %ax   	# Load the Kernel Data Segment descriptor!
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %fs
+    movw %ax, %gs
+    movl %esp, %eax   	# Push us the stack
+    pushl %eax
+    movl $handler, %eax
+	
+    call *%eax       	# A special call, preserves the 'eip' register
+	
+	cli
+
+	movl %eax, %edx	  	# store return value in edx temporarily
+	
+    popl %eax
+    popl %gs
+    popl %fs
+    popl %es
+    popl %ds
+	
+	movl %edx, 36(%esp) # Move return value into position of error code in the stack
+    popa
+	
+	# check if it is a system call
+	cmpl $0x80, (%esp)
+	jne .skip				# not a system call
+	movl 4(%esp), %eax 		# set the return value to eax	
+	
+	
+	.skip:
+    addl $8, %esp  			# Cleans up the pushed error code and pushed ISR number
+	pushl %eax
+
+
+	movl next_task, %eax
+    cmpl $0, %eax
+	je .return
+
+	movl next_task, %eax 	# Get type of return, 1 - return from inpterrupt, 0 - return from sys call
+	movl TOR_OFFSET(%eax),%eax
+	cmpl $0, %eax
+	je .return_from_syscall
+
+	popl %eax
+
+		
+	movl next_task, %eax 
+	movl SEC_ESP0(%eax), %eax  # offset to pcb's second hardware context esp0
+	movl %eax, %esp 		   # Change stack pointer to top of kernel stack of new process
+
+
+	#return from interrupt and into the kernel mode, then don't push ESP and SS
+
+	movl next_task, %eax
+	movw SEC_DS_OFFSET(%eax), %ax
+	movw $0x18, %bx 			#the KERNEL_DS
+	cmpw %ax, %bx
+	je .skip_2
+
+	movl next_task, %eax        # Set SS Register
+    movw SEC_SS_OFFSET(%eax), %ax
+    pushl %eax
+    
+	movl next_task, %eax
+	movl SEC_ESP_OFFSET(%eax), %eax	# ESP_OFFSET
+	pushl %eax
+	
+	.skip_2:
+
+
+	# push the ESP, EFLAGS and EIP into the stack
+	movl next_task, %eax
+	movl SEC_EFLAGS_OFFSET(%eax), %eax	# EFLAGS_OFFSET	
+	pushl %eax
+	
+
+	movl next_task, %eax        		# Set CS register
+    movw SEC_CS_OFFSET(%eax), %ax
+    pushl %eax
+    
+
+
+
+	movl next_task, %eax
+	movl SEC_EIP_OFFSET(%eax), %eax		# EIP_OFFSET
+	pushl %eax
+
+	
+
+	
+	# restore all the other register values from the stored seconary tss
+	
+	movl next_task, %ebx
+	movl SEC_ECX_OFFSET(%ebx), %ecx	# ESP_OFFSET
+	movl next_task, %ebx
+	movl SEC_EDX_OFFSET(%ebx), %edx	# ESP_OFFSET
+	movl next_task, %ebx
+	movl SEC_EDI_OFFSET(%ebx), %edi	# ESP_OFFSET
+	movl next_task, %ebx
+	movl SEC_ESI_OFFSET(%ebx), %esi	# ESP_OFFSET
+	movl next_task, %ebx
+	movl SEC_EBP_OFFSET(%ebx), %ebp	# ESP_OFFSET
+	movl next_task, %ebx
+	movl SEC_EAX_OFFSET(%ebx), %eax	# ESP_OFFSET
+	movl next_task, %ebx
+	movl SEC_EBX_OFFSET(%ebx), %ebx	# ESP_OFFSET
+
+	pushl %eax
+
+	movl next_task, %eax
+    movw SEC_DS_OFFSET(%eax), %ax   # Set DS Register
+	movw %ax, %ds
+
+	popl %eax
+
+	
+	sti
+    iret           # pops 5 or 3 things at once: CS, EIP, EFLAGS, SS, and ESP!
+
+
+	.return:
+	popl %eax
+	skip_eax:
+	sti
+    iret           # pops 5 things at once: CS, EIP, EFLAGS, SS, and ESP!
+
+
+    .return_from_syscall:
+
+    #change all register values for return from systemcall
+    
+    movl next_task, %eax
+    movw DS_OFFSET(%eax), %ax   # Set DS Register
+	movw %ax, %ds
+	
+	
+	
+    movl next_task, %eax        # Set SS Register
+    movw SS_OFFSET(%eax), %ax
+    movw %ax, 20(%esp)
+    
+
+
+	movl next_task, %eax
+	movl ESP_OFFSET(%eax), %eax	# ESP_OFFSET
+	movl %eax, 16(%esp)
+	
+
+	movl next_task, %eax
+	movl EFLAGS_OFFSET(%eax), %eax	# EFLAGS_OFFSET	
+	movl %eax, 12(%esp)
+	
+
+	movl next_task, %eax        # Set CS register
+    movw CS_OFFSET(%eax), %ax
+    movw %ax, 8(%esp)
+    
+
+    movl next_task, %eax
+	movl EIP_OFFSET(%eax), %eax	# EIP_OFFSET
+	movl %eax, 4(%esp)
+	
+	popl %eax
+
+
+	
+	
+	movl next_task, %ebx
+	movl ECX_OFFSET(%ebx), %ecx	# ESP_OFFSET
+	movl next_task, %ebx
+	movl EDX_OFFSET(%ebx), %edx	# ESP_OFFSET
+	movl next_task, %ebx
+	movl EDI_OFFSET(%ebx), %edi	# ESP_OFFSET
+	movl next_task, %ebx
+	movl ESI_OFFSET(%ebx), %esi	# ESP_OFFSET
+	movl next_task, %ebx
+	movl EBP_OFFSET(%ebx), %ebp	# ESP_OFFSET
+	movl next_task, %ebx
+	movl EBX_OFFSET(%ebx), %ebx	# ESP_OFFSET
+	jmp skip_eax 
+
+
+
+
+
+call_execute:
+	pushl %ebp
+	movl %esp, %ebp
+	movl $2,%eax		# SYS Call number for execute
+	movl 8(%esp), %ebx	# pointer to filename
+	int $0x80
+	popl %ebp
+	ret
+	
+	
